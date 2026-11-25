@@ -1,0 +1,7 @@
+.env
+*.bak*
+__pycache__/
+*.tmp
+# runtime state
+seen.json
+alerts.json
