@@ -5,3 +5,4 @@ __pycache__/
 # runtime state
 seen.json
 alerts.json
+seeded.json

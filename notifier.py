@@ -1,13 +1,16 @@
 import html, json, os, re, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 import xml.etree.ElementTree as ET
+from typing import NamedTuple
 from pathlib import Path
 
 HERE = Path(__file__).parent
 SEEN_FILE = HERE / "seen.json"
 ALERTS_FILE = HERE / "alerts.json"
+SEEDED_FILE = HERE / "seeded.json"
 HOMER_PAGE = Path.home() / "homer/data/concerts.yml"
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+DRY_RUN = not TOKEN
 EDITOR_URL = os.environ.get("EDITOR_URL") or "http://localhost:8095"
 CLAUDE = Path.home() / ".local/bin/claude"  # full path: systemd's PATH has no ~/.local/bin
 SCHEMA = json.dumps({"type": "object", "required": ["alerts"], "properties": {"alerts": {
@@ -30,10 +33,13 @@ def load_artists():
     return list(artists.values())
 
 
+CASE_SENSITIVE_MAX_LEN = 3  # "Ado" must not match "ADO"
+
+
 def names_in(names, title):
     # Japanese titles have no spaces, so only ASCII names need word boundaries.
     return any(re.search(rf"(?<!\w){re.escape(n)}(?!\w)" if n.isascii() else re.escape(n),
-                         title, 0 if len(n) <= 3 else re.I)
+                         title, 0 if len(n) <= CASE_SENSITIVE_MAX_LEN else re.I)
                for n in names)
 
 
@@ -63,6 +69,11 @@ def search(names, local):
             if names_in(names, title):
                 hits.setdefault(link, title)
     return [(t, l) for l, t in hits.items()]
+
+
+class Alert(NamedTuple):
+    summary: str
+    headlines: list[int]
 
 
 class ClaudeError(Exception):
@@ -108,7 +119,7 @@ For each alert, write a one-sentence English summary with the date, city and ven
     if res.get("is_error") or out.returncode:
         raise ClaudeError(res.get("result") or f"exit {out.returncode}")
     alerts = res["structured_output"]["alerts"]
-    return [(a["summary"], [i for i in a["headlines"] if 0 <= i < len(headlines)]) for a in alerts]
+    return [Alert(a["summary"], [i for i in a["headlines"] if 0 <= i < len(headlines)]) for a in alerts]
 
 
 def save(path, obj):
@@ -118,7 +129,7 @@ def save(path, obj):
 
 
 def send(text):
-    if not TOKEN:
+    if DRY_RUN:
         print(text, "\n")
         return
     text = "<b>[CONCERT]</b>\n" + text
@@ -129,16 +140,21 @@ def send(text):
 def main():
     seen = set(json.loads(SEEN_FILE.read_text())) if SEEN_FILE.exists() else set()
     alerts = json.loads(ALERTS_FILE.read_text()) if ALERTS_FILE.exists() else {}
-    first_run = not seen
+    artists = load_artists()
+    if SEEDED_FILE.exists():
+        seeded = set(json.loads(SEEDED_FILE.read_text()))
+    else:  # seen.json predates seeded.json, so every current artist already ran once
+        seeded = {names[0] for names, _ in artists} if seen else set()
     claude_error = None
-    for names, local in load_artists():
+    for names, local in artists:
         artist = names[0]
         try:
             new = [(t, l) for t, l in search(names, local) if l not in seen]
-            if not new:
-                continue
-            if first_run:
+            if artist not in seeded:  # the first run for an artist only records old news
+                seeded.add(artist)
                 seen.update(l for _, l in new)
+                continue
+            if not new:
                 continue
             found = classify(artist, local, [t for t, _ in new], [a["summary"] for a in alerts.get(artist, [])])
         except ClaudeError as e:
@@ -162,6 +178,7 @@ def main():
         save(SEEN_FILE, sorted(seen))
         save(ALERTS_FILE, alerts)
     save(SEEN_FILE, sorted(seen))
+    save(SEEDED_FILE, sorted(seeded))
     write_homer_page(alerts)
     if claude_error:
         send("⚠️ <b>Concert notifier: Claude Code failed</b>\n"

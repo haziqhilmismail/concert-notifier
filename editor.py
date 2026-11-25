@@ -1,4 +1,4 @@
-import html, os, urllib.parse
+import html, ipaddress, os, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -16,6 +16,16 @@ Add <code>| local</code> for a Malaysian artist, e.g. <code>Anuar Zain | local</
 Changes apply on the next check (every 6 hours).</small></p>"""
 
 
+def trusted_host(host):
+    # DNS rebinding needs a public domain name. IPs, single-label names and the tailnet are safe.
+    name = urllib.parse.urlsplit("//" + host).hostname or ""
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        return "." not in name or name.endswith(".ts.net")
+
+
 class Handler(BaseHTTPRequestHandler):
     def page(self, msg=""):
         body = PAGE.format(msg=msg, text=html.escape(ARTISTS.read_text())).encode()
@@ -28,9 +38,9 @@ class Handler(BaseHTTPRequestHandler):
         self.page()
 
     def do_POST(self):
-        origin = self.headers.get("Origin")
-        if origin and urllib.parse.urlsplit(origin).netloc != self.headers.get("Host"):
-            self.send_error(403)  # blocks a form POST from another site
+        host, origin = self.headers.get("Host", ""), self.headers.get("Origin")
+        if not trusted_host(host) or (origin and urllib.parse.urlsplit(origin).netloc != host):
+            self.send_error(403)
             return
         size = int(self.headers.get("Content-Length", 0))
         if not 0 <= size <= 100_000:

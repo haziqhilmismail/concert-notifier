@@ -18,6 +18,7 @@ For a foreign artist, it alerts on shows in Malaysia or Singapore, and on new to
 
 - `concert-notifier.timer` (systemd user timer) starts `notifier.py` every 6 hours (00:00, 06:00, 12:00, 18:00 Malaysia time).
 - `concert-editor.service` (systemd user service) runs `editor.py`. This is a small web page on port 8095 to edit `artists.txt`.
+  The editor has no password. It accepts a save only from its own page, at an IP address, a one-word host name, or a `.ts.net` name. Do not open port 8095 to the internet.
 
 Both units are in `~/.config/systemd/user/`. The notifier unit loads `.env` with `EnvironmentFile=`.
 
@@ -29,7 +30,7 @@ Both units are in `~/.config/systemd/user/`. The notifier unit loads `.env` with
    - `TELEGRAM_CHAT_ID`: the chat that gets the alerts.
    - `EDITOR_URL`: the URL of `editor.py`, for the link on the Homer page.
 3. Put one artist per line in `artists.txt`. Write other spellings after `/`. Add `| local` for a Malaysian artist.
-4. Run `python3 notifier.py` once. The first run only records the current headlines, so you do not get old news.
+4. Run `python3 notifier.py` once. The first run for each artist only records the current headlines, so you do not get old news. This is also true for an artist that you add later.
 
 If `TELEGRAM_TOKEN` is empty, the script prints the alerts and sends nothing.
 
@@ -42,4 +43,5 @@ artists.txt    the artists to follow
 .env.example   the env vars, with empty values
 seen.json      headlines already checked (runtime state, not in git)
 alerts.json    alerts already sent (runtime state, not in git)
+seeded.json    artists that had their first run (runtime state, not in git)
 ```
