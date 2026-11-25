@@ -1,5 +1,3 @@
-"""Tiny web editor for artists.txt: one text box and a Save button.
-Runs as the concert-editor systemd user service on port 8095 (LAN and Tailscale only)."""
 import html, os, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -30,15 +28,19 @@ class Handler(BaseHTTPRequestHandler):
         self.page()
 
     def do_POST(self):
+        origin = self.headers.get("Origin")
+        if origin and urllib.parse.urlsplit(origin).netloc != self.headers.get("Host"):
+            self.send_error(403)  # blocks a form POST from another site
+            return
         size = int(self.headers.get("Content-Length", 0))
-        if size > 100_000:
+        if not 0 <= size <= 100_000:
             self.send_error(413)
             return
         form = urllib.parse.parse_qs(self.rfile.read(size).decode(), keep_blank_values=True)
         text = form.get("artists", [""])[0].replace("\r\n", "\n").strip() + "\n"
         tmp = ARTISTS.with_suffix(".tmp")
         tmp.write_text(text)
-        os.replace(tmp, ARTISTS)  # atomic, so the notifier never reads a half-written file
+        os.replace(tmp, ARTISTS)
         count = sum(1 for line in text.splitlines() if line.strip())
         self.page(f"<p>✅ Saved {count} artists.</p>")
 
